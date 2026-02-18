@@ -33,6 +33,9 @@ class ManualReviewPolicy(Policy):
         review_callback:  Optional async callable for immediate automated review.
     """
 
+    _policy_type = "manual_review"
+    _policy_description = "Holds responses for manual review before delivery"
+
     def __init__(
         self,
         *,

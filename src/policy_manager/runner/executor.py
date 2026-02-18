@@ -197,6 +197,10 @@ class Executor:
             if "query" not in result:
                 result["query"] = " ".join(m.content for m in input_data.messages if m.content)
 
+        # Pass transaction token for billing policies (e.g., TransactionPolicy)
+        if input_data.transaction_token is not None:
+            result["transaction_token"] = input_data.transaction_token
+
         return result
 
     async def _run_handler(self, input_data: RunnerInput, ctx: RequestContext) -> Any:

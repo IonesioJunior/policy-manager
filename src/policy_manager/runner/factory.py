@@ -80,9 +80,20 @@ class PolicyFactory:
             type_name: Type string to use in configuration
             policy_class: Policy class to instantiate
 
+        Raises:
+            ValueError: If policy_class._policy_type doesn't match type_name
+
         Example:
             PolicyFactory.register("my_policy", MyCustomPolicy)
         """
+        # Validate consistency between _policy_type and registration name
+        if hasattr(policy_class, "_policy_type"):
+            declared_type = policy_class._policy_type
+            if declared_type != "base" and declared_type != type_name:
+                raise ValueError(
+                    f"Policy {policy_class.__name__} has _policy_type='{declared_type}' "
+                    f"but is being registered as '{type_name}'"
+                )
         cls._registry[type_name] = policy_class
 
     @classmethod

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from policy_manager.result import PolicyResult
 
@@ -27,7 +27,16 @@ class Policy(ABC):
     * Read from ``context.input``, ``context.output``, ``context.metadata``.
     * **Write** to ``context.metadata`` to pass data to downstream policies.
     * Use ``self.store`` for persistent state (injected by the manager).
+
+    Class Variables:
+        _policy_type: Type identifier for serialization (e.g., "rate_limit").
+        _policy_version: Version string for the policy schema.
+        _policy_description: Human-readable description of the policy.
     """
+
+    _policy_type: ClassVar[str] = "base"
+    _policy_version: ClassVar[str] = "1.0"
+    _policy_description: ClassVar[str] = ""
 
     store: Store
 
@@ -69,10 +78,22 @@ class Policy(ABC):
 
         Subclasses should call ``super().export()`` and populate the
         ``"config"`` key in the returned dict.
+
+        The export format is SyftHub-compatible, including:
+        - name: Policy instance name
+        - type: Policy type identifier (e.g., "rate_limit", "transaction")
+        - version: Schema version
+        - enabled: Whether the policy is active
+        - description: Human-readable description
+        - phase: Which execution phases this policy runs in
+        - config: Policy-specific configuration
         """
         return {
             "name": self.name,
-            "type": type(self).__name__,
+            "type": self._policy_type,
+            "version": self._policy_version,
+            "enabled": True,
+            "description": self._policy_description,
             "phase": self._detect_phases(),
             "config": {},
         }

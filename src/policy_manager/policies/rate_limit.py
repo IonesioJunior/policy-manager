@@ -28,6 +28,9 @@ class RateLimitPolicy(Policy):
         clock:           Injectable clock for testing.
     """
 
+    _policy_type = "rate_limit"
+    _policy_description = "Limits request rate per user within a time window"
+
     def __init__(
         self,
         *,

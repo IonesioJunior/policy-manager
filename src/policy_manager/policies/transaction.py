@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+import warnings
+from typing import TYPE_CHECKING, Any, Literal
 
 from policy_manager.policies.base import Policy
 from policy_manager.result import PolicyResult
@@ -12,19 +13,23 @@ if TYPE_CHECKING:
     from policy_manager.context import RequestContext
 
 try:
-    import httpx
+    import httpx  # type: ignore[import-not-found]
 
     _HTTPX_AVAILABLE = True
 except ImportError:
     _HTTPX_AVAILABLE = False
 
+# Pricing mode types
+PricingMode = Literal["per_call", "per_token"]
+
 
 class TransactionPolicy(Policy):
     """Confirms transactions with an external ledger after successful execution.
 
-    This policy runs in the post-execution phase. It expects a transaction token
+    This policy validates transaction tokens in pre-execution and confirms
+    transactions with the ledger in post-execution. It expects a transaction token
     in the request input (placed there by the client who has already reserved
-    funds with the ledger) and confirms the transaction after the handler succeeds.
+    funds with the ledger).
 
     Parameters:
         name: Unique policy name.
@@ -34,24 +39,36 @@ class TransactionPolicy(Policy):
         token_field: Field name in context.input containing the transaction token.
             Defaults to "transaction_token".
         timeout: HTTP request timeout in seconds. Defaults to 30.0.
-        price_per_request: Price charged per request (declared to SyftAPI for
-            client visibility). Defaults to 0.0.
+        pricing_mode: Either "per_call" (flat rate) or "per_token" (usage-based).
+        price_per_call: Price per request when using "per_call" mode.
+        input_token_price: Price per input token when using "per_token" mode.
+        output_token_price: Price per output token when using "per_token" mode.
+        currency: Currency code for pricing. Defaults to "USD".
+        price_per_request: Deprecated. Use price_per_call instead.
 
     Raises:
         RuntimeError: If httpx is not installed. Install with
             ``pip install policy-manager[ledger]``.
 
     Example:
+        >>> # Per-call pricing
         >>> policy = TransactionPolicy(
         ...     ledger_url="https://api.ledger.example.com",
         ...     api_token="at_xxx",
+        ...     pricing_mode="per_call",
+        ...     price_per_call=0.05,
         ... )
-        >>> await pm.add_policy(policy)
 
-        Or with environment variables:
-        >>> # Set LEDGER_URL and LEDGER_API_TOKEN env vars
-        >>> policy = TransactionPolicy()
+        >>> # Per-token pricing
+        >>> policy = TransactionPolicy(
+        ...     pricing_mode="per_token",
+        ...     input_token_price=0.01,
+        ...     output_token_price=0.02,
+        ... )
     """
+
+    _policy_type = "transaction"
+    _policy_description = "Confirms transactions with external ledger for billing"
 
     def __init__(
         self,
@@ -61,7 +78,14 @@ class TransactionPolicy(Policy):
         api_token: str | None = None,
         token_field: str = "transaction_token",
         timeout: float = 30.0,
-        price_per_request: float = 0.0,
+        # Pricing parameters (SyftHub-compatible)
+        pricing_mode: PricingMode = "per_call",
+        price_per_call: float = 0.0,
+        input_token_price: float = 0.0,
+        output_token_price: float = 0.0,
+        currency: str = "USD",
+        # Deprecated (backward compatibility)
+        price_per_request: float | None = None,
     ) -> None:
         if not _HTTPX_AVAILABLE:
             raise RuntimeError(
@@ -75,7 +99,21 @@ class TransactionPolicy(Policy):
         self._api_token = api_token or os.getenv("LEDGER_API_TOKEN", "")
         self._token_field = token_field
         self._timeout = timeout
-        self._price_per_request = price_per_request
+
+        # Handle deprecated price_per_request parameter
+        if price_per_request is not None:
+            warnings.warn(
+                "price_per_request is deprecated, use price_per_call instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            price_per_call = price_per_request
+
+        self._pricing_mode: PricingMode = pricing_mode
+        self._price_per_call = price_per_call
+        self._input_token_price = input_token_price
+        self._output_token_price = output_token_price
+        self._currency = currency
 
     @property
     def name(self) -> str:
@@ -96,20 +134,67 @@ class TransactionPolicy(Policy):
             return None
 
     def export(self) -> dict[str, Any]:
-        """Export policy configuration in canonical format.
+        """Export policy configuration in SyftHub-compatible format.
 
-        Returns the policy's native configuration. Consumers (like syfthub-api)
-        are responsible for transforming this to their specific format needs.
+        Returns configuration structured for SyftHub consumption:
+        - Per-call mode: {"pricingMode": "per_call", "price": <amount>}
+        - Per-token mode: {"costs": {"inputTokens": <price>, "outputTokens": <price>}}
         """
         data = super().export()
-        data["config"] = {
-            "ledger_url": self._ledger_url or None,
-            "token_field": self._token_field,
-            "timeout": self._timeout,
-            "has_api_token": bool(self._api_token),
-            "price_per_request": self._price_per_request,
-        }
+
+        if self._pricing_mode == "per_call":
+            data["config"] = {
+                "pricingMode": "per_call",
+                "price": self._price_per_call,
+                "currency": self._currency,
+                "ledger_url": self._ledger_url or None,
+                "token_field": self._token_field,
+                "timeout": self._timeout,
+                "has_api_token": bool(self._api_token),
+            }
+        else:  # per_token
+            data["config"] = {
+                "pricingMode": "per_token",
+                "costs": {
+                    "inputTokens": self._input_token_price,
+                    "outputTokens": self._output_token_price,
+                    "currency": self._currency,
+                },
+                "ledger_url": self._ledger_url or None,
+                "token_field": self._token_field,
+                "timeout": self._timeout,
+                "has_api_token": bool(self._api_token),
+            }
         return data
+
+    async def pre_execute(self, context: RequestContext) -> PolicyResult:
+        """Validate the transaction token before handler execution.
+
+        Checks that:
+        1. The transaction token is present in context.input
+        2. The token format is valid (can extract transfer ID)
+
+        Args:
+            context: The request context containing the transaction token.
+
+        Returns:
+            PolicyResult.allow() if token is valid,
+            PolicyResult.deny() if token is missing or invalid.
+        """
+        token = context.input.get(self._token_field)
+        if not token:
+            return PolicyResult.deny(
+                self.name,
+                f"{self._token_field} required in request input",
+            )
+
+        if self._extract_transfer_id(token) is None:
+            return PolicyResult.deny(
+                self.name,
+                "Invalid token format",
+            )
+
+        return PolicyResult.allow(self.name)
 
     async def post_execute(self, context: RequestContext) -> PolicyResult:
         """Confirm the transaction with the ledger after handler success.

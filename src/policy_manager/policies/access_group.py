@@ -26,6 +26,9 @@ class AccessGroupPolicy(Policy):
     restarts and can be mutated at runtime via ``add_users`` / ``add_documents``.
     """
 
+    _policy_type = "access_group"
+    _policy_description = "Controls access based on user membership in a group"
+
     def __init__(
         self,
         *,

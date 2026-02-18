@@ -31,6 +31,9 @@ class AttributionPolicy(Policy):
         url_input_key:     Key in ``context.input`` holding the attribution URL.
     """
 
+    _policy_type = "attribution"
+    _policy_description = "Requires verified attribution before access"
+
     def __init__(
         self,
         *,

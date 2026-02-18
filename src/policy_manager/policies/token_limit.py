@@ -33,6 +33,9 @@ class TokenLimitPolicy(Policy):
         token_counter:     Optional callable ``(str) -> int`` to count tokens.
     """
 
+    _policy_type = "token_limit"
+    _policy_description = "Enforces maximum token/character counts on input and output"
+
     def __init__(
         self,
         *,

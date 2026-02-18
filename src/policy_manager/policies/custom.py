@@ -28,6 +28,9 @@ class CustomPolicy(Policy):
         deny_reason: Message returned when the check returns ``False``.
     """
 
+    _policy_type = "custom"
+    _policy_description = "Custom callable-based policy"
+
     def __init__(
         self,
         *,

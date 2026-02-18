@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 class AllOf(Policy):
     """Passes only if **all** child policies pass.  Short-circuits on first denial."""
 
+    _policy_type = "all_of"
+    _policy_description = "Composite policy requiring all child policies to pass"
+
     def __init__(self, *policies: Policy, name: str = "") -> None:
         self._policies = list(policies)
         self._name = name or f"all_of({','.join(p.name for p in self._policies)})"
@@ -53,6 +56,9 @@ class AllOf(Policy):
 
 class AnyOf(Policy):
     """Passes if **at least one** child policy passes."""
+
+    _policy_type = "any_of"
+    _policy_description = "Composite policy requiring at least one child policy to pass"
 
     def __init__(self, *policies: Policy, name: str = "") -> None:
         self._policies = list(policies)
@@ -98,6 +104,9 @@ class AnyOf(Policy):
 
 class Not(Policy):
     """Inverts a policy's result — allow becomes deny and vice versa."""
+
+    _policy_type = "not"
+    _policy_description = "Composite policy that inverts child policy result"
 
     def __init__(self, policy: Policy, *, name: str = "", deny_reason: str = "") -> None:
         self._policy = policy

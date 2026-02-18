@@ -29,6 +29,9 @@ class PromptFilterPolicy(Policy):
         check_output:   Whether to check output during ``post_execute``.
     """
 
+    _policy_type = "prompt_filter"
+    _policy_description = "Blocks requests matching forbidden content patterns"
+
     def __init__(
         self,
         *,

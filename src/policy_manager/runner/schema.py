@@ -83,6 +83,7 @@ class RunnerInput(BaseModel):
         store: Store configuration for stateful policies
         handler_path: Absolute path to the handler (runner.py)
         work_dir: Working directory for the handler
+        transaction_token: Optional transaction token for billing policies
     """
 
     type: str
@@ -93,6 +94,7 @@ class RunnerInput(BaseModel):
     store: StoreConfigSchema = Field(default_factory=StoreConfigSchema)
     handler_path: str
     work_dir: str
+    transaction_token: str | None = None
 
 
 class PolicyResultSchema(BaseModel):
