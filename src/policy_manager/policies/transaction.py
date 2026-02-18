@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from policy_manager.context import RequestContext
 
 try:
-    import httpx  # type: ignore[import-not-found]
+    import httpx
 
     _HTTPX_AVAILABLE = True
 except ImportError:
