@@ -240,7 +240,11 @@ async def test_export_full_details(pm):
     assert data["policy_count"] == 1
     entry = data["policies"][0]
     assert entry["name"] == "rate"
-    assert entry["type"] == "RateLimitPolicy"
+    assert entry["type"] == "rate_limit"
     assert entry["phase"] == ["pre"]
     assert entry["config"]["max_requests"] == 100
     assert entry["config"]["window_seconds"] == 3600
+    # SyftHub-compatible fields
+    assert entry["version"] == "1.0"
+    assert entry["enabled"] is True
+    assert "description" in entry

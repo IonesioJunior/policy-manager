@@ -152,10 +152,28 @@ async def test_allow_successful_confirmation(tx, ctx_with_token, valid_token):
         assert call_args[1]["headers"]["Authorization"] == "Bearer at_test_token_123"
 
 
-async def test_pre_execute_passthrough(tx, ctx_with_token):
-    """pre_execute should always allow (confirmation happens in post_execute)."""
+async def test_pre_execute_validates_token(tx, ctx_with_token):
+    """pre_execute should validate token presence and format."""
     result = await tx.pre_execute(ctx_with_token)
     assert result.allowed
+
+
+async def test_pre_execute_denies_missing_token(tx, ctx_without_token):
+    """pre_execute should deny when token is missing."""
+    result = await tx.pre_execute(ctx_without_token)
+    assert not result.allowed
+    assert "transaction_token required" in result.reason
+
+
+async def test_pre_execute_denies_invalid_token_format(tx):
+    """pre_execute should deny when token format is invalid."""
+    ctx = RequestContext(
+        user_id="alice@acme.com",
+        input={"query": "test", "transaction_token": "invalid_format"},
+    )
+    result = await tx.pre_execute(ctx)
+    assert not result.allowed
+    assert "Invalid token format" in result.reason
 
 
 # ── HTTP error tests ─────────────────────────────────────────────
@@ -232,13 +250,17 @@ async def test_export(tx, ledger_url):
     data = tx.export()
 
     assert data["name"] == "tx"
-    assert data["type"] == "TransactionPolicy"
-    assert data["phase"] == ["post"]
+    assert data["type"] == "transaction"
+    assert data["version"] == "1.0"
+    assert data["enabled"] is True
+    assert "description" in data
+    assert data["phase"] == ["pre", "post"]
     assert data["config"]["ledger_url"] == ledger_url
     assert data["config"]["token_field"] == "transaction_token"
     assert data["config"]["timeout"] == 30.0
     assert data["config"]["has_api_token"] is True
-    assert data["config"]["price_per_request"] == 0.0
+    assert data["config"]["pricingMode"] == "per_call"
+    assert data["config"]["price"] == 0.0
 
 
 async def test_export_no_api_token(store, ledger_url):
@@ -275,20 +297,66 @@ async def test_custom_timeout(store, ledger_url, api_token, ctx_with_token):
         assert call_args[1]["timeout"] == 5.0
 
 
-# ── Price per request tests ──────────────────────────────────────
+# ── Pricing tests ────────────────────────────────────────────────
 
 
-async def test_price_per_request_export(store, ledger_url, api_token):
+async def test_per_call_pricing_export(store, ledger_url, api_token):
+    """Test per-call pricing mode export."""
     policy = TransactionPolicy(
         name="tx",
         ledger_url=ledger_url,
         api_token=api_token,
-        price_per_request=0.05,
+        pricing_mode="per_call",
+        price_per_call=0.05,
+        currency="USD",
     )
     await policy.setup(store)
 
     data = policy.export()
-    assert data["config"]["price_per_request"] == 0.05
+    assert data["config"]["pricingMode"] == "per_call"
+    assert data["config"]["price"] == 0.05
+    assert data["config"]["currency"] == "USD"
+
+
+async def test_per_token_pricing_export(store, ledger_url, api_token):
+    """Test per-token pricing mode export."""
+    policy = TransactionPolicy(
+        name="tx",
+        ledger_url=ledger_url,
+        api_token=api_token,
+        pricing_mode="per_token",
+        input_token_price=0.01,
+        output_token_price=0.02,
+        currency="EUR",
+    )
+    await policy.setup(store)
+
+    data = policy.export()
+    assert data["config"]["pricingMode"] == "per_token"
+    assert data["config"]["costs"]["inputTokens"] == 0.01
+    assert data["config"]["costs"]["outputTokens"] == 0.02
+    assert data["config"]["costs"]["currency"] == "EUR"
+
+
+def test_deprecated_price_per_request():
+    """Test that deprecated price_per_request emits warning but works."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        policy = TransactionPolicy(
+            name="tx",
+            ledger_url="https://test.com",
+            api_token="tok",
+            price_per_request=0.05,
+        )
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+        assert "price_per_request is deprecated" in str(w[0].message)
+
+        # Still works - sets price_per_call
+        data = policy.export()
+        assert data["config"]["price"] == 0.05
 
 
 # ── Token format tests ────────────────────────────────────────────

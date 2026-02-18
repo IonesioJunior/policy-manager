@@ -27,6 +27,11 @@ def _assert_base_shape(data: dict, *, name: str, type_name: str, phases: list[st
     assert data["type"] == type_name
     assert data["phase"] == phases
     assert isinstance(data["config"], dict)
+    # SyftHub-compatible fields
+    assert "version" in data
+    assert "enabled" in data
+    assert data["enabled"] is True
+    assert "description" in data
 
 
 def _assert_json_roundtrip(data: dict) -> None:
@@ -41,7 +46,7 @@ def _assert_json_roundtrip(data: dict) -> None:
 def test_rate_limit_export():
     p = RateLimitPolicy(name="rl", max_requests=100, window_seconds=3600)
     data = p.export()
-    _assert_base_shape(data, name="rl", type_name="RateLimitPolicy", phases=["pre"])
+    _assert_base_shape(data, name="rl", type_name="rate_limit", phases=["pre"])
     assert data["config"] == {"max_requests": 100, "window_seconds": 3600}
     _assert_json_roundtrip(data)
 
@@ -52,7 +57,7 @@ def test_rate_limit_export():
 def test_token_limit_export_defaults():
     p = TokenLimitPolicy(name="tl", max_input_tokens=500, max_output_tokens=1000)
     data = p.export()
-    _assert_base_shape(data, name="tl", type_name="TokenLimitPolicy", phases=["pre", "post"])
+    _assert_base_shape(data, name="tl", type_name="token_limit", phases=["pre", "post"])
     assert data["config"]["max_input_tokens"] == 500
     assert data["config"]["max_output_tokens"] == 1000
     assert data["config"]["input_path"] == "query"
@@ -79,7 +84,7 @@ def test_access_group_export():
         documents=["doc_a", "doc_b"],
     )
     data = p.export()
-    _assert_base_shape(data, name="eng", type_name="AccessGroupPolicy", phases=["pre"])
+    _assert_base_shape(data, name="eng", type_name="access_group", phases=["pre"])
     assert data["config"]["owner"] == "admin@acme.com"
     assert data["config"]["users"] == ["alice@acme.com", "bob@acme.com"]  # sorted
     assert data["config"]["documents"] == ["doc_a", "doc_b"]
@@ -92,7 +97,7 @@ def test_access_group_export():
 def test_attribution_export_no_callback():
     p = AttributionPolicy(name="attr")
     data = p.export()
-    _assert_base_shape(data, name="attr", type_name="AttributionPolicy", phases=["pre"])
+    _assert_base_shape(data, name="attr", type_name="attribution", phases=["pre"])
     assert data["config"]["url_input_key"] == "attribution_url"
     assert data["config"]["has_verify_callback"] is False
     _assert_json_roundtrip(data)
@@ -115,7 +120,7 @@ def test_attribution_export_with_callback():
 def test_manual_review_export_no_callback():
     p = ManualReviewPolicy(name="review")
     data = p.export()
-    _assert_base_shape(data, name="review", type_name="ManualReviewPolicy", phases=["post"])
+    _assert_base_shape(data, name="review", type_name="manual_review", phases=["post"])
     assert data["config"]["has_review_callback"] is False
     _assert_json_roundtrip(data)
 
@@ -133,31 +138,58 @@ def test_manual_review_export_with_callback():
 # ── TransactionPolicy ────────────────────────────────────────
 
 
-def test_transaction_export_with_config():
+def test_transaction_export_per_call_pricing():
+    """Test export with per-call pricing mode (SyftHub-compatible)."""
     p = TransactionPolicy(
         name="txn",
         ledger_url="https://api.ledger.example.com",
         api_token="at_xxx",
         token_field="payment_token",
         timeout=15.0,
-        price_per_request=0.10,
+        pricing_mode="per_call",
+        price_per_call=0.10,
+        currency="USD",
     )
     data = p.export()
-    _assert_base_shape(data, name="txn", type_name="TransactionPolicy", phases=["post"])
+    _assert_base_shape(data, name="txn", type_name="transaction", phases=["pre", "post"])
     assert data["config"]["ledger_url"] == "https://api.ledger.example.com"
     assert data["config"]["token_field"] == "payment_token"
     assert data["config"]["timeout"] == 15.0
     assert data["config"]["has_api_token"] is True
-    assert data["config"]["price_per_request"] == 0.10
+    assert data["config"]["pricingMode"] == "per_call"
+    assert data["config"]["price"] == 0.10
+    assert data["config"]["currency"] == "USD"
+    _assert_json_roundtrip(data)
+
+
+def test_transaction_export_per_token_pricing():
+    """Test export with per-token pricing mode (SyftHub-compatible)."""
+    p = TransactionPolicy(
+        name="txn",
+        ledger_url="https://api.ledger.example.com",
+        api_token="at_xxx",
+        pricing_mode="per_token",
+        input_token_price=0.01,
+        output_token_price=0.02,
+        currency="USD",
+    )
+    data = p.export()
+    _assert_base_shape(data, name="txn", type_name="transaction", phases=["pre", "post"])
+    assert data["config"]["pricingMode"] == "per_token"
+    assert data["config"]["costs"]["inputTokens"] == 0.01
+    assert data["config"]["costs"]["outputTokens"] == 0.02
+    assert data["config"]["costs"]["currency"] == "USD"
     _assert_json_roundtrip(data)
 
 
 def test_transaction_export_defaults():
+    """Test export with default values (per_call mode with zero price)."""
     p = TransactionPolicy(name="txn2", ledger_url="https://ledger.test", api_token="tok")
     data = p.export()
     assert data["config"]["token_field"] == "transaction_token"
     assert data["config"]["timeout"] == 30.0
-    assert data["config"]["price_per_request"] == 0.0
+    assert data["config"]["pricingMode"] == "per_call"
+    assert data["config"]["price"] == 0.0
     _assert_json_roundtrip(data)
 
 
@@ -174,7 +206,7 @@ def test_prompt_filter_export_patterns():
         check_output=False,
     )
     data = p.export()
-    _assert_base_shape(data, name="pf", type_name="PromptFilterPolicy", phases=["pre", "post"])
+    _assert_base_shape(data, name="pf", type_name="prompt_filter", phases=["pre", "post"])
     assert data["config"]["patterns"] == ["secret", r"\bpassword\b"]
     assert data["config"]["has_filter_fn"] is False
     assert data["config"]["input_path"] == "prompt"
@@ -198,7 +230,7 @@ def test_prompt_filter_export_with_filter_fn():
 def test_custom_export_pre():
     p = CustomPolicy(name="c1", phase="pre", check=lambda ctx: True, deny_reason="nope")
     data = p.export()
-    _assert_base_shape(data, name="c1", type_name="CustomPolicy", phases=["pre", "post"])
+    _assert_base_shape(data, name="c1", type_name="custom", phases=["pre", "post"])
     assert data["config"]["phase"] == "pre"
     assert data["config"]["deny_reason"] == "nope"
     assert data["config"]["has_check"] is True
@@ -221,7 +253,7 @@ def test_allof_export():
     comp = AllOf(child1, child2, name="both_limits")
     data = comp.export()
 
-    _assert_base_shape(data, name="both_limits", type_name="AllOf", phases=["pre", "post"])
+    _assert_base_shape(data, name="both_limits", type_name="all_of", phases=["pre", "post"])
     cfg = data["config"]
     assert cfg["operator"] == "all_of"
     assert len(cfg["policies"]) == 2
@@ -239,7 +271,7 @@ def test_anyof_export():
     comp = AnyOf(child1, child2, name="either")
     data = comp.export()
 
-    _assert_base_shape(data, name="either", type_name="AnyOf", phases=["pre", "post"])
+    _assert_base_shape(data, name="either", type_name="any_of", phases=["pre", "post"])
     cfg = data["config"]
     assert cfg["operator"] == "any_of"
     assert len(cfg["policies"]) == 2
@@ -254,7 +286,7 @@ def test_not_export():
     comp = Not(child, name="inverted", deny_reason="should have failed")
     data = comp.export()
 
-    _assert_base_shape(data, name="inverted", type_name="Not", phases=["pre", "post"])
+    _assert_base_shape(data, name="inverted", type_name="not", phases=["pre", "post"])
     cfg = data["config"]
     assert cfg["operator"] == "not"
     assert cfg["policy"]["name"] == "inner"
