@@ -3,6 +3,7 @@
 from policy_manager.policies.access_group import AccessGroupPolicy
 from policy_manager.policies.attribution import AttributionPolicy
 from policy_manager.policies.base import Policy
+from policy_manager.policies.bundle_subscription import BundleSubscriptionPolicy
 from policy_manager.policies.composite import AllOf, AnyOf, Not
 from policy_manager.policies.custom import CustomPolicy
 from policy_manager.policies.manual_review import ManualReviewPolicy
@@ -17,6 +18,7 @@ __all__ = [
     "AllOf",
     "AnyOf",
     "AttributionPolicy",
+    "BundleSubscriptionPolicy",
     "CustomPolicy",
     "ManualReviewPolicy",
     "Not",
