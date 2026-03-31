@@ -18,12 +18,12 @@ from policy_manager.policies import (
     BundleSubscriptionPolicy,
     CustomPolicy,
     ManualReviewPolicy,
+    MppAccountingPolicy,
     Not,
     Policy,
     PromptFilterPolicy,
     RateLimitPolicy,
     TokenLimitPolicy,
-    TransactionPolicy,
 )
 
 from .schema import PolicyConfigSchema
@@ -63,7 +63,7 @@ class PolicyFactory:
         "prompt_filter": PromptFilterPolicy,
         "attribution": AttributionPolicy,
         "manual_review": ManualReviewPolicy,
-        "transaction": TransactionPolicy,
+        "mpp_accounting": MppAccountingPolicy,
         "custom": CustomPolicy,
     }
 

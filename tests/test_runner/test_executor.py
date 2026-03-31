@@ -52,32 +52,32 @@ class TestBuildInputDict:
         assert len(result["messages"]) == 2
         assert result["query"] == "Hello Hi there"
 
-    def test_transaction_token_passthrough(self, executor):
-        """Test that transaction_token is passed to context.input."""
+    def test_x_payment_passthrough(self, executor):
+        """Test that x_payment is passed to context.input."""
         input_data = RunnerInput(
             type="data_source",
             query="test query",
             context=ExecutionContextSchema(user_id="alice", endpoint_slug="test"),
             handler_path="/path/to/handler.py",
             work_dir="/path/to",
-            transaction_token="txn_abc123.salt.expires.sig",
+            x_payment="cred_abc123",
         )
 
         result = executor._build_input_dict(input_data)
 
-        assert result["transaction_token"] == "txn_abc123.salt.expires.sig"
+        assert result["x_payment"] == "cred_abc123"
 
-    def test_no_transaction_token_when_none(self, executor):
-        """Test that transaction_token is not included when None."""
+    def test_no_x_payment_when_none(self, executor):
+        """Test that x_payment is not included when None."""
         input_data = RunnerInput(
             type="data_source",
             query="test query",
             context=ExecutionContextSchema(user_id="alice", endpoint_slug="test"),
             handler_path="/path/to/handler.py",
             work_dir="/path/to",
-            transaction_token=None,
+            x_payment=None,
         )
 
         result = executor._build_input_dict(input_data)
 
-        assert "transaction_token" not in result
+        assert "x_payment" not in result

@@ -17,6 +17,7 @@ import asyncio
 from typing import Any
 
 from policy_manager import PolicyManager, RequestContext
+from policy_manager.exceptions import PaymentRequiredError
 from policy_manager.result import PolicyResult
 from policy_manager.stores import InMemoryStore, SQLiteStore, Store
 
@@ -87,6 +88,13 @@ class Executor:
                 error=str(e),
                 error_type="PolicyFactoryError",
             )
+        except PaymentRequiredError as e:
+            return RunnerOutput(
+                success=False,
+                error="Payment required",
+                error_type="PaymentRequired",
+                payment_challenge={"realm": e.realm, "challenge": e.challenge},
+            )
         except HandlerLoadError as e:
             return RunnerOutput(
                 success=False,
@@ -149,10 +157,12 @@ class Executor:
                 return self._policy_denied_output(post_result)
 
             # 7. Success
+            receipt = ctx.metadata.get("mpp_payment_receipt")
             return RunnerOutput(
                 success=True,
                 result=handler_result,
                 policy_result=PolicyResultSchema(allowed=True),
+                payment_receipt=str(receipt) if receipt is not None else None,
             )
         finally:
             # Always close the store if we created it
@@ -197,9 +207,9 @@ class Executor:
             if "query" not in result:
                 result["query"] = " ".join(m.content for m in input_data.messages if m.content)
 
-        # Pass transaction token for billing policies (e.g., TransactionPolicy)
-        if input_data.transaction_token is not None:
-            result["transaction_token"] = input_data.transaction_token
+        # Pass MPP payment credential for MppAccountingPolicy
+        if input_data.x_payment is not None:
+            result["x_payment"] = input_data.x_payment
 
         return result
 

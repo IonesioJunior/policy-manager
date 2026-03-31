@@ -36,6 +36,24 @@ class PolicyConfigError(PolicyError):
         super().__init__(f"Policy '{policy_name}' misconfigured: {message}")
 
 
+class PaymentRequiredError(PolicyError):
+    """Raised when MPP payment is required before the request can proceed.
+
+    This is a flow-control signal, not a policy violation. The executor
+    catches it and surfaces the challenge in ``RunnerOutput.payment_challenge``
+    so the Go SDK can forward an HTTP 402 response to the client.
+
+    Attributes:
+        realm: The MPP realm (endpoint identifier) that requires payment.
+        challenge: The WWW-Authenticate challenge string to forward to the client.
+    """
+
+    def __init__(self, realm: str, challenge: str) -> None:
+        self.realm = realm
+        self.challenge = challenge
+        super().__init__(f"Payment required for realm '{realm}'")
+
+
 class StoreError(PolicyError):
     """Raised when a store operation fails."""
 

@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ledger = ["httpx>=0.24"]
-all = ["httpx>=0.24"]
+mpp = ["pympp[tempo]>=0.4.0; python_version>='3.12'"]
+all = ["pympp[tempo]>=0.4.0; python_version>='3.12'"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
@@ -25,7 +25,6 @@ dev = [
     "coverage",
     "pre-commit",
     "aiosqlite>=0.19",
-    "httpx>=0.24",
 ]
 
 [tool.hatch.build.targets.wheel]

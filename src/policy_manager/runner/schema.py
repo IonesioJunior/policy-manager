@@ -83,7 +83,7 @@ class RunnerInput(BaseModel):
         store: Store configuration for stateful policies
         handler_path: Absolute path to the handler (runner.py)
         work_dir: Working directory for the handler
-        transaction_token: Optional transaction token for billing policies
+        x_payment: Optional MPP payment credential from the X-Payment header
     """
 
     type: str
@@ -94,7 +94,7 @@ class RunnerInput(BaseModel):
     store: StoreConfigSchema = Field(default_factory=StoreConfigSchema)
     handler_path: str
     work_dir: str
-    transaction_token: str | None = None
+    x_payment: str | None = None
 
 
 class PolicyResultSchema(BaseModel):
@@ -128,6 +128,11 @@ class RunnerOutput(BaseModel):
         error: Error message (on failure)
         error_type: Error class name (on failure)
         policy_result: Detailed policy evaluation result
+        payment_challenge: MPP challenge payload when payment is required
+            (error_type="PaymentRequired"). Contains "realm" and "challenge"
+            keys for the Go SDK to forward as an HTTP 402 response.
+        payment_receipt: MPP payment receipt reference on successful paid
+            execution, for the Go SDK to forward as a Payment-Receipt header.
     """
 
     success: bool
@@ -135,3 +140,5 @@ class RunnerOutput(BaseModel):
     error: str = ""
     error_type: str = ""
     policy_result: PolicyResultSchema | None = None
+    payment_challenge: dict[str, Any] | None = None
+    payment_receipt: str | None = None

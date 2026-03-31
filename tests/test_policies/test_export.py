@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+from unittest.mock import MagicMock
+
+import policy_manager.policies.mpp_accounting as _mpp_mod
 from policy_manager.policies import (
     AccessGroupPolicy,
     AllOf,
@@ -11,11 +14,11 @@ from policy_manager.policies import (
     AttributionPolicy,
     CustomPolicy,
     ManualReviewPolicy,
+    MppAccountingPolicy,
     Not,
     PromptFilterPolicy,
     RateLimitPolicy,
     TokenLimitPolicy,
-    TransactionPolicy,
 )
 
 # ── helpers ──────────────────────────────────────────────────
@@ -135,61 +138,33 @@ def test_manual_review_export_with_callback():
     _assert_json_roundtrip(data)
 
 
-# ── TransactionPolicy ────────────────────────────────────────
+# ── MppAccountingPolicy ──────────────────────────────────────
 
 
-def test_transaction_export_per_call_pricing():
-    """Test export with per-call pricing mode (SyftHub-compatible)."""
-    p = TransactionPolicy(
-        name="txn",
-        ledger_url="https://api.ledger.example.com",
-        api_token="at_xxx",
-        token_field="payment_token",
-        timeout=15.0,
-        pricing_mode="per_call",
-        price_per_call=0.10,
-        currency="USD",
+def test_mpp_accounting_export(monkeypatch):
+    """Test export with tiered pricing configuration."""
+    monkeypatch.setattr(_mpp_mod, "_MPP_AVAILABLE", True)
+    monkeypatch.setattr(_mpp_mod, "Mpp", MagicMock(), raising=False)
+
+    p = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc123",
+        realm="my-endpoint",
+        pricing_tiers=[
+            {"price": 0.0, "applied_to": ["admin@example.com"]},
+            {"price": 0.05, "applied_to": ["*"]},
+        ],
+        testnet=True,
+        secret_key="secret",
     )
     data = p.export()
-    _assert_base_shape(data, name="txn", type_name="transaction", phases=["pre", "post"])
-    assert data["config"]["ledger_url"] == "https://api.ledger.example.com"
-    assert data["config"]["token_field"] == "payment_token"
-    assert data["config"]["timeout"] == 15.0
-    assert data["config"]["has_api_token"] is True
-    assert data["config"]["pricingMode"] == "per_call"
-    assert data["config"]["price"] == 0.10
-    assert data["config"]["currency"] == "USD"
-    _assert_json_roundtrip(data)
-
-
-def test_transaction_export_per_token_pricing():
-    """Test export with per-token pricing mode (SyftHub-compatible)."""
-    p = TransactionPolicy(
-        name="txn",
-        ledger_url="https://api.ledger.example.com",
-        api_token="at_xxx",
-        pricing_mode="per_token",
-        input_token_price=0.01,
-        output_token_price=0.02,
-        currency="USD",
-    )
-    data = p.export()
-    _assert_base_shape(data, name="txn", type_name="transaction", phases=["pre", "post"])
-    assert data["config"]["pricingMode"] == "per_token"
-    assert data["config"]["costs"]["inputTokens"] == 0.01
-    assert data["config"]["costs"]["outputTokens"] == 0.02
-    assert data["config"]["costs"]["currency"] == "USD"
-    _assert_json_roundtrip(data)
-
-
-def test_transaction_export_defaults():
-    """Test export with default values (per_call mode with zero price)."""
-    p = TransactionPolicy(name="txn2", ledger_url="https://ledger.test", api_token="tok")
-    data = p.export()
-    assert data["config"]["token_field"] == "transaction_token"
-    assert data["config"]["timeout"] == 30.0
-    assert data["config"]["pricingMode"] == "per_call"
-    assert data["config"]["price"] == 0.0
+    _assert_base_shape(data, name="mpp", type_name="mpp_accounting", phases=["pre", "post"])
+    assert data["config"]["wallet_address"] == "0xAbc123"
+    assert data["config"]["realm"] == "my-endpoint"
+    assert data["config"]["testnet"] is True
+    assert data["config"]["has_secret_key"] is True
+    assert len(data["config"]["pricing_tiers"]) == 2
+    assert data["config"]["pricing_tiers"][0] == {"price": 0.0, "applied_to": ["admin@example.com"]}
     _assert_json_roundtrip(data)
 
 
