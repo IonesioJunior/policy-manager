@@ -5,9 +5,10 @@ from __future__ import annotations
 import fnmatch
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING, Any
 
-from policy_manager.exceptions import PaymentRequiredError
+from policy_manager.exceptions import PaymentRequiredError, PolicyConfigError
 from policy_manager.policies.base import Policy
 from policy_manager.result import PolicyResult
 
@@ -22,16 +23,38 @@ except ImportError:
     _MPP_AVAILABLE = False
 
 
+PriceLike = Decimal | int | float | str
+
+
+def _coerce_price(value: PriceLike) -> Decimal:
+    """Convert a price-like value into ``Decimal`` without binary-fp drift.
+
+    Floats are routed through ``str()`` first so ``0.1`` becomes
+    ``Decimal("0.1")`` rather than ``Decimal("0.1000000000000000055511151...")``.
+    """
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool):  # bool is an int subclass — reject explicitly
+        raise ValueError(f"Boolean is not a valid price: {value!r}")
+    if isinstance(value, int):
+        return Decimal(value)
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError) as e:
+        raise ValueError(f"Cannot interpret {value!r} as a price") from e
+
+
 @dataclass
 class _PricingTier:
     """A single pricing tier for MPP accounting.
 
     Attributes:
-        price: Price in USD per query. 0.0 means free — payment logic is skipped.
+        price: Price per query as a ``Decimal``. ``0`` means free — payment logic
+            is skipped before contacting the settlement layer.
         applied_to: List of user_id glob patterns this tier applies to.
     """
 
-    price: float
+    price: Decimal
     applied_to: list[str]
 
     def matches(self, user_id: str) -> bool:
@@ -42,7 +65,8 @@ class _PricingTier:
         """Higher specificity wins when multiple tiers match.
 
         Non-wildcard patterns score their character length; wildcard-only
-        patterns score 0.
+        patterns score 0. Ties are broken by config order (Python's ``max``
+        keeps the first-seen winner).
         """
         return max((len(p) for p in self.applied_to if "*" not in p), default=0)
 
@@ -57,13 +81,16 @@ class MppAccountingPolicy(Policy):
     client pays on-chain, receives a credential, and retries with
     ``x_payment`` in the request; the policy verifies and stores the receipt.
 
-    Pricing is tiered: the most-specific matching tier wins. A price of ``0.0``
-    is a free tier that skips all payment logic entirely.
+    Pricing is tiered: the most-specific matching tier wins. A price of ``0``
+    is a free tier that skips all payment logic entirely. Prices are stored
+    internally as :class:`~decimal.Decimal` to avoid binary-fp drift on money;
+    ``str(price)`` is what's handed to the settlement layer and to receipts.
 
-    A class-level cache of ``Mpp`` instances (keyed by
-    ``"{wallet_address}:{realm}"``) ensures that the same server instance
-    that issued a challenge also verifies the returned credential — required
-    for consistent HMAC verification across the 402 → pay → retry round-trip.
+    Cross-process HMAC consistency (across the 402 → pay → retry round-trip)
+    is provided by a stable ``secret_key`` — every subprocess builds a fresh
+    ``Mpp`` from the same secret. The policy keeps a small *per-instance*
+    cache of ``Mpp`` objects only to avoid reconstructing them when one
+    ``PolicyManager`` evaluates multiple requests inside a single process.
 
     Parameters:
         name: Unique policy instance name. Defaults to ``"mpp_accounting"``.
@@ -72,18 +99,22 @@ class MppAccountingPolicy(Policy):
         realm: Endpoint identifier used as the MPP realm (typically the
             endpoint slug). Falls back to the ``MPP_REALM`` env var.
         pricing_tiers: List of dicts, each with:
-            - ``"price"`` (float) — cost in USD per query.
+            - ``"price"`` — cost per query. Accepts ``Decimal``, ``int``,
+              ``float``, or numeric ``str``; floats are routed through
+              ``str()`` to avoid fp drift.
             - ``"applied_to"`` (list[str]) — user_id glob patterns.
-            Defaults to a single free-tier ``[{"price": 0.0, "applied_to": ["*"]}]``.
+            Defaults to a single free-tier ``[{"price": 0, "applied_to": ["*"]}]``.
         testnet: Use Tempo testnet RPC when ``True`` (default). Set to
             ``False`` for mainnet.
         secret_key: HMAC secret used to sign and verify MPP challenges.
-            Auto-generated and persisted externally if not provided; falls back
-            to the ``MPP_SECRET_KEY`` environment variable.
+            **Required** when any tier has price > 0. Falls back to the
+            ``MPP_SECRET_KEY`` environment variable.
 
     Raises:
         RuntimeError: If ``pympp`` is not installed.
             Install with ``pip install policy-manager[mpp]``.
+        PolicyConfigError: If a paid tier is configured but no ``secret_key``
+            (or ``MPP_SECRET_KEY`` env var) is supplied.
 
     Example:
         >>> policy = MppAccountingPolicy(
@@ -99,11 +130,6 @@ class MppAccountingPolicy(Policy):
 
     _policy_type = "mpp_accounting"
     _policy_description = "Per-query payments via Machine Payments Protocol on Tempo blockchain"
-
-    # Cached Mpp server instances, keyed by "{wallet_address}:{realm}".
-    # Shared across instances so the same Mpp object that issues a challenge
-    # is available to verify the credential on the follow-up request.
-    _mpp_instances: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,
@@ -128,30 +154,76 @@ class MppAccountingPolicy(Policy):
         self._secret_key = secret_key or os.getenv("MPP_SECRET_KEY", "")
 
         raw_tiers: list[dict[str, Any]] = pricing_tiers or [
-            {"price": 0.0, "applied_to": ["*"]}
+            {"price": 0, "applied_to": ["*"]}
         ]
         self._tiers: list[_PricingTier] = [
             _PricingTier(
-                price=float(t["price"]),
+                price=_coerce_price(t["price"]),
                 applied_to=list(t.get("applied_to", ["*"])),
             )
             for t in raw_tiers
         ]
+
+        # Fail-fast guard: a paid tier without a stable HMAC secret produces
+        # silent wallet drains. The runner is invoked subprocess-per-request,
+        # so the 402 → pay → retry round-trip crosses processes; without a
+        # persistent secret_key, each Mpp() picks a fresh, mutually-incompatible
+        # key and HMAC verification of the returned credential always fails,
+        # returning a fresh challenge every time.
+        if not self._secret_key and any(t.price > 0 for t in self._tiers):
+            raise PolicyConfigError(
+                self._name,
+                "secret_key (or MPP_SECRET_KEY env var) is required when any "
+                "pricing tier has price > 0; without it, HMAC verification "
+                "cannot succeed across subprocess invocations.",
+            )
+
+        # Per-instance cache of Mpp server objects keyed by "{wallet}:{realm}".
+        # Cross-process HMAC consistency is provided by ``secret_key``, NOT by
+        # an in-memory cache — each subprocess builds a fresh Mpp from the same
+        # secret. This cache only saves construction cost when a single
+        # PolicyManager evaluates multiple requests in one process.
+        self._mpp_cache: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
         return self._name
 
     def _get_mpp(self) -> Any:
-        """Return (or create and cache) the Mpp server instance for this wallet+realm."""
+        """Return (creating if necessary) the Mpp server instance for this wallet+realm."""
         key = f"{self._wallet_address}:{self._realm}"
-        if key not in MppAccountingPolicy._mpp_instances:
-            MppAccountingPolicy._mpp_instances[key] = Mpp(  # type: ignore[name-defined]
+        cached = self._mpp_cache.get(key)
+        if cached is None:
+            cached = Mpp(  # type: ignore[name-defined]
                 wallet_address=self._wallet_address,
                 secret_key=self._secret_key,
                 testnet=self._testnet,
             )
-        return MppAccountingPolicy._mpp_instances[key]
+            self._mpp_cache[key] = cached
+        return cached
+
+    def invalidate_mpp_cache(self) -> None:
+        """Drop any cached Mpp instances. Call after rotating wallet/secret_key."""
+        self._mpp_cache.clear()
+
+    @staticmethod
+    def _extract_challenge(source: Any) -> str | None:
+        """Pull a challenge string out of a Challenge-like object or exception.
+
+        pympp signals "payment required" by either raising with ``challenge`` /
+        ``www_authenticate`` set on the exception, or returning a Challenge
+        object that exposes the same attributes. Anything without one of those
+        attributes is treated as a non-challenge.
+        """
+        # Order matters: Challenge return objects use ``www_authenticate``,
+        # while pympp's PaymentRequired exception uses ``challenge``. Probe the
+        # serialized form first so a Challenge object whose framework also
+        # exposes a richer ``challenge`` field still serializes cleanly.
+        for attr in ("www_authenticate", "challenge"):
+            value = getattr(source, attr, None)
+            if value is not None:
+                return str(value)
+        return None
 
     def _resolve_tier(self, user_id: str) -> _PricingTier | None:
         """Return the most-specific pricing tier that matches ``user_id``.
@@ -201,7 +273,7 @@ class MppAccountingPolicy(Policy):
         if tier is None:
             return PolicyResult.deny(self.name, "No pricing tier matches your account")
 
-        if tier.price == 0.0:
+        if tier.price == 0:
             return PolicyResult.allow(self.name)
 
         if not self._wallet_address:
@@ -219,28 +291,34 @@ class MppAccountingPolicy(Policy):
         credential: str | None = context.input.get("x_payment")
         mpp = self._get_mpp()
 
+        # pympp signals "payment required" two ways depending on version/path:
+        #   (a) it raises, with the challenge attached to the exception, or
+        #   (b) it returns a Challenge-like object instead of (cred, receipt).
+        # Both map to PaymentRequiredError. Any *other* exception is genuine
+        # infrastructure failure (network, RPC, malformed config) and must
+        # propagate so the executor reports it as ExecutionError rather than
+        # silently masquerading as a policy denial.
         try:
             result = mpp.charge(
-                price=tier.price,
+                price=str(tier.price),
                 realm=self._realm,
                 authorization=credential,
             )
         except Exception as e:
-            # The pympp library raises when no valid credential is present,
-            # embedding the challenge in the exception. Surface it as a
-            # PaymentRequiredError so the executor can produce a 402.
-            challenge = getattr(e, "challenge", None) or getattr(e, "www_authenticate", None)
+            challenge = self._extract_challenge(e)
             if challenge is not None:
-                raise PaymentRequiredError(realm=self._realm, challenge=str(challenge)) from e
-            return PolicyResult.deny(self.name, f"MPP charge failed: {e}")
+                raise PaymentRequiredError(realm=self._realm, challenge=challenge) from e
+            raise
 
         if not isinstance(result, tuple):
-            challenge_str = str(getattr(result, "www_authenticate", result))
-            raise PaymentRequiredError(realm=self._realm, challenge=challenge_str)
+            challenge = self._extract_challenge(result)
+            if challenge is None:
+                raise PaymentRequiredError(realm=self._realm, challenge=str(result))
+            raise PaymentRequiredError(realm=self._realm, challenge=challenge)
 
         _, receipt = result
         context.metadata["mpp_payment_receipt"] = receipt
-        context.metadata["mpp_price_charged"] = tier.price
+        context.metadata["mpp_price_charged"] = str(tier.price)
         return PolicyResult.allow(self.name)
 
     async def post_execute(self, context: RequestContext) -> PolicyResult:
@@ -263,7 +341,7 @@ class MppAccountingPolicy(Policy):
             "testnet": self._testnet,
             "has_secret_key": bool(self._secret_key),
             "pricing_tiers": [
-                {"price": t.price, "applied_to": t.applied_to} for t in self._tiers
+                {"price": str(t.price), "applied_to": t.applied_to} for t in self._tiers
             ],
         }
         return data

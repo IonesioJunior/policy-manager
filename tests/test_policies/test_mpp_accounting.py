@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 import pytest
 
 import policy_manager.policies.mpp_accounting as _mpp_mod
 from policy_manager.context import RequestContext
-from policy_manager.exceptions import PaymentRequiredError
-from policy_manager.policies.mpp_accounting import MppAccountingPolicy
-
+from policy_manager.exceptions import PaymentRequiredError, PolicyConfigError
+from policy_manager.policies.mpp_accounting import MppAccountingPolicy, _coerce_price
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -20,12 +20,10 @@ def mpp_cls(monkeypatch):
     """Simulate pympp being installed for all tests in this module.
 
     Returns the mock Mpp class so individual tests can configure it.
-    Clears the instance cache between tests to avoid state bleed.
     """
     mock_cls = MagicMock()
     monkeypatch.setattr(_mpp_mod, "_MPP_AVAILABLE", True)
     monkeypatch.setattr(_mpp_mod, "Mpp", mock_cls, raising=False)
-    MppAccountingPolicy._mpp_instances.clear()
     return mock_cls
 
 
@@ -62,6 +60,89 @@ def test_raises_without_pympp(monkeypatch):
     monkeypatch.setattr(_mpp_mod, "_MPP_AVAILABLE", False)
     with pytest.raises(RuntimeError, match="pympp is required"):
         MppAccountingPolicy(name="mpp", wallet_address="0x1", realm="r")
+
+
+def test_paid_tier_without_secret_raises(monkeypatch):
+    """Any tier with price > 0 requires secret_key — fail fast at __init__."""
+    monkeypatch.delenv("MPP_SECRET_KEY", raising=False)
+    with pytest.raises(PolicyConfigError, match="secret_key"):
+        MppAccountingPolicy(
+            name="mpp",
+            wallet_address="0xAbc",
+            realm="r",
+            pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        )
+
+
+def test_free_only_does_not_require_secret(monkeypatch):
+    """A policy with only free tiers does not require secret_key."""
+    monkeypatch.delenv("MPP_SECRET_KEY", raising=False)
+    p = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="r",
+        pricing_tiers=[{"price": 0, "applied_to": ["*"]}],
+    )
+    assert p is not None  # construction succeeded
+
+
+def test_secret_key_from_env(monkeypatch):
+    """MPP_SECRET_KEY env var satisfies the guard."""
+    monkeypatch.setenv("MPP_SECRET_KEY", "env_secret")
+    p = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="r",
+        pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+    )
+    assert p._secret_key == "env_secret"
+
+
+# ── Decimal pricing ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (0, Decimal("0")),
+        (0.0, Decimal("0")),
+        (0.05, Decimal("0.05")),
+        ("0.05", Decimal("0.05")),
+        (Decimal("0.05"), Decimal("0.05")),
+        # The classic float-arithmetic trap: 0.1 must NOT become 0.1000…0055
+        (0.1, Decimal("0.1")),
+    ],
+)
+def test_coerce_price_accepts_numeric_types(raw, expected):
+    assert _coerce_price(raw) == expected
+
+
+def test_coerce_price_rejects_bool():
+    with pytest.raises(ValueError, match="Boolean"):
+        _coerce_price(True)  # type: ignore[arg-type]
+
+
+def test_coerce_price_rejects_garbage():
+    with pytest.raises(ValueError, match="Cannot interpret"):
+        _coerce_price("not a number")
+
+
+async def test_decimal_price_round_trip_through_metadata(store, mpp_cls):
+    """A float-configured tier surfaces as a clean ``str(Decimal)`` in metadata."""
+    p = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="r",
+        pricing_tiers=[{"price": 0.1, "applied_to": ["*"]}],  # the fp-trap
+        secret_key="test_secret",
+    )
+    await p.setup(store)
+    mpp_cls.return_value.charge.return_value = ("cred", "receipt")
+
+    ctx = RequestContext(user_id="alice@acme.com", input={"x_payment": "cred"})
+    await p.pre_execute(ctx)
+
+    assert ctx.metadata["mpp_price_charged"] == "0.1"
 
 
 # ── Free tier ─────────────────────────────────────────────────────
@@ -104,6 +185,7 @@ async def test_no_matching_tier_denies(store):
         wallet_address="0xAbc",
         realm="test",
         pricing_tiers=[{"price": 0.05, "applied_to": ["admin@*"]}],
+        secret_key="test_secret",
     )
     await p.setup(store)
 
@@ -123,6 +205,7 @@ async def test_most_specific_tier_wins(store):
             {"price": 0.05, "applied_to": ["*"]},
             {"price": 0.0, "applied_to": ["alice@acme.com"]},
         ],
+        secret_key="test_secret",
     )
     await p.setup(store)
 
@@ -154,6 +237,7 @@ async def test_missing_wallet_denies(store):
         wallet_address="",
         realm="test",
         pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
     )
     await p.setup(store)
 
@@ -169,6 +253,7 @@ async def test_missing_realm_denies(store):
         wallet_address="0xAbc",
         realm="",
         pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
     )
     await p.setup(store)
 
@@ -220,16 +305,32 @@ async def test_valid_credential_allows_and_stores_receipt(
 
     assert result.allowed
     assert ctx_with_payment.metadata["mpp_payment_receipt"] == "receipt_xyz"
-    assert ctx_with_payment.metadata["mpp_price_charged"] == 0.05
+    # Price is stored as the string form of the Decimal so it's JSON-safe.
+    assert ctx_with_payment.metadata["mpp_price_charged"] == "0.05"
 
 
-async def test_charge_failure_without_challenge_denies(paid_policy, ctx_with_payment, mpp_cls):
-    """mpp.charge() raising a plain exception (no challenge) results in a deny."""
-    mpp_cls.return_value.charge.side_effect = Exception("network timeout")
+async def test_charge_passes_decimal_string_to_mpp(paid_policy, ctx_with_payment, mpp_cls):
+    """The charge() call must receive the price as ``str(Decimal)``, not a float."""
+    mpp_cls.return_value.charge.return_value = ("cred", "receipt")
 
-    result = await paid_policy.pre_execute(ctx_with_payment)
-    assert not result.allowed
-    assert "MPP charge failed" in result.reason
+    await paid_policy.pre_execute(ctx_with_payment)
+
+    _, kwargs = mpp_cls.return_value.charge.call_args
+    assert kwargs["price"] == "0.05"
+    assert isinstance(kwargs["price"], str)
+
+
+async def test_charge_infrastructure_error_propagates(paid_policy, ctx_with_payment, mpp_cls):
+    """A non-challenge exception (network, RPC) must propagate, not deny.
+
+    Silently turning infra errors into policy denials hides real problems and
+    lets the orchestrator believe the user was rejected when the chain was
+    simply unreachable.
+    """
+    mpp_cls.return_value.charge.side_effect = RuntimeError("network timeout")
+
+    with pytest.raises(RuntimeError, match="network timeout"):
+        await paid_policy.pre_execute(ctx_with_payment)
 
 
 # ── Post-execute ──────────────────────────────────────────────────
@@ -258,12 +359,13 @@ async def test_post_execute_no_op_when_no_receipt(paid_policy):
 
 
 async def test_mpp_instance_is_reused_across_calls(store, mpp_cls):
-    """The Mpp constructor is called once per (wallet, realm) pair."""
+    """A single policy instance reuses one Mpp across consecutive requests."""
     p = MppAccountingPolicy(
         name="mpp",
         wallet_address="0xAbc",
         realm="endpoint-1",
         pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
     )
     await p.setup(store)
 
@@ -274,6 +376,62 @@ async def test_mpp_instance_is_reused_across_calls(store, mpp_cls):
     await p.pre_execute(ctx)
 
     mpp_cls.assert_called_once()
+
+
+async def test_mpp_cache_is_per_instance_not_class_level(store, mpp_cls):
+    """Two separate policy instances must NOT share an Mpp cache.
+
+    The previous class-level cache made wallet rotation impossible without
+    process restart. With an instance-level cache, each policy owns its
+    Mpp objects and ``invalidate_mpp_cache()`` works deterministically.
+    """
+    p1 = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="ep",
+        pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
+    )
+    p2 = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="ep",
+        pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
+    )
+    await p1.setup(store)
+    await p2.setup(store)
+
+    mpp_cls.return_value.charge.return_value = ("cred", "receipt")
+    ctx = RequestContext(user_id="alice@acme.com", input={"x_payment": "cred"})
+
+    await p1.pre_execute(ctx)
+    await p2.pre_execute(ctx)
+
+    # Each instance built its own Mpp.
+    assert mpp_cls.call_count == 2
+    assert not hasattr(MppAccountingPolicy, "_mpp_instances")
+
+
+async def test_invalidate_mpp_cache_forces_rebuild(store, mpp_cls):
+    """Calling invalidate_mpp_cache() drops cached Mpp instances."""
+    p = MppAccountingPolicy(
+        name="mpp",
+        wallet_address="0xAbc",
+        realm="ep",
+        pricing_tiers=[{"price": 0.05, "applied_to": ["*"]}],
+        secret_key="test_secret",
+    )
+    await p.setup(store)
+
+    mpp_cls.return_value.charge.return_value = ("cred", "receipt")
+    ctx = RequestContext(user_id="alice@acme.com", input={"x_payment": "cred"})
+
+    await p.pre_execute(ctx)
+    p.invalidate_mpp_cache()
+    await p.pre_execute(ctx)
+
+    assert mpp_cls.call_count == 2
 
 
 # ── Export ────────────────────────────────────────────────────────
@@ -292,7 +450,8 @@ async def test_export_shape(paid_policy):
     assert data["config"]["realm"] == "test-endpoint"
     assert data["config"]["testnet"] is True
     assert data["config"]["has_secret_key"] is True
-    assert data["config"]["pricing_tiers"] == [{"price": 0.05, "applied_to": ["*"]}]
+    # Prices export as strings (Decimal-preserving, JSON-safe).
+    assert data["config"]["pricing_tiers"] == [{"price": "0.05", "applied_to": ["*"]}]
 
 
 async def test_export_no_wallet_or_secret(store):

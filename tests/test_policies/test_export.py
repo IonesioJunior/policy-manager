@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-
 from unittest.mock import MagicMock
 
 import policy_manager.policies.mpp_accounting as _mpp_mod
@@ -164,7 +163,12 @@ def test_mpp_accounting_export(monkeypatch):
     assert data["config"]["testnet"] is True
     assert data["config"]["has_secret_key"] is True
     assert len(data["config"]["pricing_tiers"]) == 2
-    assert data["config"]["pricing_tiers"][0] == {"price": 0.0, "applied_to": ["admin@example.com"]}
+    # Prices export as strings (Decimal-preserving, JSON-safe).
+    assert data["config"]["pricing_tiers"][0] == {
+        "price": "0.0",
+        "applied_to": ["admin@example.com"],
+    }
+    assert data["config"]["pricing_tiers"][1] == {"price": "0.05", "applied_to": ["*"]}
     _assert_json_roundtrip(data)
 
 
