@@ -81,7 +81,7 @@ class Policy(ABC):
 
         The export format is SyftHub-compatible, including:
         - name: Policy instance name
-        - type: Policy type identifier (e.g., "rate_limit", "transaction")
+        - type: Policy type identifier (e.g., "rate_limit", "access_group")
         - version: Schema version
         - enabled: Whether the policy is active
         - description: Human-readable description

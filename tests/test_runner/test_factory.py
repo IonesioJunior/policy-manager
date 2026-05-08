@@ -20,7 +20,6 @@ class TestPolicyFactory:
         assert "prompt_filter" in types
         assert "attribution" in types
         assert "manual_review" in types
-        assert "mpp_accounting" in types
         assert "custom" in types
         # Composite types
         assert "all_of" in types

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
-import policy_manager.policies.mpp_accounting as _mpp_mod
 from policy_manager.policies import (
     AccessGroupPolicy,
     AllOf,
@@ -13,7 +11,6 @@ from policy_manager.policies import (
     AttributionPolicy,
     CustomPolicy,
     ManualReviewPolicy,
-    MppAccountingPolicy,
     Not,
     PromptFilterPolicy,
     RateLimitPolicy,
@@ -134,41 +131,6 @@ def test_manual_review_export_with_callback():
     p = ManualReviewPolicy(name="review2", review_callback=_review)
     data = p.export()
     assert data["config"]["has_review_callback"] is True
-    _assert_json_roundtrip(data)
-
-
-# ── MppAccountingPolicy ──────────────────────────────────────
-
-
-def test_mpp_accounting_export(monkeypatch):
-    """Test export with tiered pricing configuration."""
-    monkeypatch.setattr(_mpp_mod, "_MPP_AVAILABLE", True)
-    monkeypatch.setattr(_mpp_mod, "Mpp", MagicMock(), raising=False)
-
-    p = MppAccountingPolicy(
-        name="mpp",
-        wallet_address="0xAbc123",
-        realm="my-endpoint",
-        pricing_tiers=[
-            {"price": 0.0, "applied_to": ["admin@example.com"]},
-            {"price": 0.05, "applied_to": ["*"]},
-        ],
-        testnet=True,
-        secret_key="secret",
-    )
-    data = p.export()
-    _assert_base_shape(data, name="mpp", type_name="mpp_accounting", phases=["pre", "post"])
-    assert data["config"]["wallet_address"] == "0xAbc123"
-    assert data["config"]["realm"] == "my-endpoint"
-    assert data["config"]["testnet"] is True
-    assert data["config"]["has_secret_key"] is True
-    assert len(data["config"]["pricing_tiers"]) == 2
-    # Prices export as strings (Decimal-preserving, JSON-safe).
-    assert data["config"]["pricing_tiers"][0] == {
-        "price": "0.0",
-        "applied_to": ["admin@example.com"],
-    }
-    assert data["config"]["pricing_tiers"][1] == {"price": "0.05", "applied_to": ["*"]}
     _assert_json_roundtrip(data)
 
 

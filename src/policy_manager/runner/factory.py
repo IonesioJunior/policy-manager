@@ -15,10 +15,8 @@ from policy_manager.policies import (
     AllOf,
     AnyOf,
     AttributionPolicy,
-    BundleSubscriptionPolicy,
     CustomPolicy,
     ManualReviewPolicy,
-    MppAccountingPolicy,
     Not,
     Policy,
     PromptFilterPolicy,
@@ -57,13 +55,11 @@ class PolicyFactory:
     # Class-level registry mapping type strings to policy classes
     _registry: ClassVar[dict[str, type[Policy]]] = {
         "access_group": AccessGroupPolicy,
-        "bundle_subscription": BundleSubscriptionPolicy,
         "rate_limit": RateLimitPolicy,
         "token_limit": TokenLimitPolicy,
         "prompt_filter": PromptFilterPolicy,
         "attribution": AttributionPolicy,
         "manual_review": ManualReviewPolicy,
-        "mpp_accounting": MppAccountingPolicy,
         "custom": CustomPolicy,
     }
 

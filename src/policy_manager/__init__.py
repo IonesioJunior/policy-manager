@@ -7,7 +7,6 @@ the context as they go.  First denial stops the chain.
 from policy_manager.context import RequestContext
 from policy_manager.exceptions import (
     AccessDeniedError,
-    PaymentRequiredError,
     PolicyConfigError,
     PolicyError,
     PolicyPendingError,
@@ -18,7 +17,6 @@ from policy_manager.result import PolicyResult
 
 __all__ = [
     "AccessDeniedError",
-    "PaymentRequiredError",
     "PolicyConfigError",
     "PolicyError",
     "PolicyManager",
