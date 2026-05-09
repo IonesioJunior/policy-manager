@@ -50,4 +50,3 @@ class TestBuildInputDict:
         assert result["type"] == "model"
         assert len(result["messages"]) == 2
         assert result["query"] == "Hello Hi there"
-

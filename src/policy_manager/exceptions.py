@@ -36,7 +36,6 @@ class PolicyConfigError(PolicyError):
         super().__init__(f"Policy '{policy_name}' misconfigured: {message}")
 
 
-
 class StoreError(PolicyError):
     """Raised when a store operation fails."""
 
