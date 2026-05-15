@@ -28,6 +28,24 @@ def test_pend():
     assert r.metadata["ticket"] == "ABC"
 
 
+def test_substitute():
+    r = PolicyResult.substitute("review", output="held message", reason="held", ref="abc")
+    # A substitution succeeds and carries a replacement body.
+    assert r.allowed is True
+    assert r.substituted is True
+    assert r.pending is False
+    assert r.output == "held message"
+    assert r.policy_name == "review"
+    assert r.reason == "held"
+    assert r.metadata["ref"] == "abc"
+
+
+def test_allow_not_substituted():
+    assert PolicyResult.allow("p").substituted is False
+    assert PolicyResult.allow("p").output is None
+    assert PolicyResult.deny("p", "no").substituted is False
+
+
 def test_immutable():
     r = PolicyResult.allow()
     try:

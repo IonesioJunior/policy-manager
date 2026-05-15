@@ -9,7 +9,7 @@ changes in the Go SDK schemas.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -83,6 +83,13 @@ class RunnerInput(BaseModel):
         store: Store configuration for stateful policies
         handler_path: Absolute path to the handler (runner.py)
         work_dir: Working directory for the handler
+        policy_phase: When set, evaluate only that policy phase without
+            invoking a handler. ``"pre"`` runs the pre-execution chain
+            against the input; ``"post"`` runs the post-execution chain
+            against ``output``. ``None`` (default) runs the full
+            pre -> handler -> post pipeline.
+        output: Pre-produced handler output, evaluated by the
+            post-execution chain when ``policy_phase == "post"``.
     """
 
     type: str
@@ -93,6 +100,8 @@ class RunnerInput(BaseModel):
     store: StoreConfigSchema = Field(default_factory=StoreConfigSchema)
     handler_path: str
     work_dir: str
+    policy_phase: Literal["pre", "post"] | None = None
+    output: dict[str, Any] | None = None
 
 
 class PolicyResultSchema(BaseModel):

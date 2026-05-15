@@ -16,6 +16,11 @@ class PolicyResult:
         reason:      Human-readable explanation (mainly useful on denial).
         pending:     ``True`` when the request is not denied but awaiting
                      asynchronous resolution (e.g. manual review).
+        substituted: ``True`` when the policy replaced the response body.
+                     The executor delivers :attr:`output` to the caller
+                     instead of the handler's result.
+        output:      Replacement response body, used only when
+                     ``substituted`` is ``True``.
         metadata:    Arbitrary extra data the policy wants to surface
                      (remaining credits, review ticket id, etc.).
     """
@@ -24,6 +29,8 @@ class PolicyResult:
     policy_name: str = ""
     reason: str = ""
     pending: bool = False
+    substituted: bool = False
+    output: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # ── Factory helpers ──────────────────────────────────────
@@ -48,5 +55,24 @@ class PolicyResult:
             pending=True,
             policy_name=policy_name,
             reason=reason,
+            metadata=meta,
+        )
+
+    @staticmethod
+    def substitute(
+        policy_name: str, output: Any, reason: str = "", **meta: Any
+    ) -> PolicyResult:
+        """Result for a policy that replaced the response body with its own.
+
+        The request still succeeds (``allowed=True``) — the executor
+        delivers ``output`` to the caller instead of the handler's
+        result.  The post-execution chain stops at the substituting policy.
+        """
+        return PolicyResult(
+            allowed=True,
+            substituted=True,
+            policy_name=policy_name,
+            reason=reason,
+            output=output,
             metadata=meta,
         )

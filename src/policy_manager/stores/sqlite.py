@@ -37,6 +37,11 @@ class SQLiteStore(Store):
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
+    @property
+    def db_path(self) -> str:
+        """Filesystem path of the underlying SQLite database file."""
+        return self._db_path
+
     async def _connect(self) -> aiosqlite.Connection:
         if self._db is None:
             self._db = await aiosqlite.connect(self._db_path)

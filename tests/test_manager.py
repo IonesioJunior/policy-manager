@@ -2,13 +2,28 @@
 
 import json
 
-from policy_manager import PolicyManager, RequestContext
+from policy_manager import PolicyManager, PolicyResult, RequestContext
 from policy_manager.policies import (
     AccessGroupPolicy,
     CustomPolicy,
+    Policy,
     RateLimitPolicy,
     TokenLimitPolicy,
 )
+
+
+class _SubstitutingPolicy(Policy):
+    """Test policy that substitutes the response body during post_execute."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def post_execute(self, context):  # type: ignore[no-untyped-def]
+        return PolicyResult.substitute(self._name, output="substituted body")
 
 # ── basic chain behaviour ────────────────────────────────────
 
@@ -163,6 +178,65 @@ async def test_full_lifecycle_denied_post():
     ctx.output = {"response": "x" * 50}
     post = await pm.check_post_exec_policies(ctx)
     assert not post.allowed
+
+
+# ── substitution short-circuit ───────────────────────────────
+
+
+async def test_post_chain_short_circuits_on_substitution(pm, alice_ctx):
+    """A substituted result is terminal — later post policies never run."""
+    ran: list[str] = []
+
+    class _Recorder(Policy):
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        @property
+        def name(self) -> str:
+            return self._name
+
+        async def post_execute(self, context):  # type: ignore[no-untyped-def]
+            ran.append(self._name)
+            return PolicyResult.allow(self._name)
+
+    await pm.add_policy(_SubstitutingPolicy("sub"))
+    await pm.add_policy(_Recorder("after"))
+
+    result = await pm.check_post_exec_policies(alice_ctx)
+
+    assert result.substituted
+    assert result.allowed  # substitution is a success, not a denial
+    assert result.output == "substituted body"
+    assert result.policy_name == "sub"
+    assert ran == []  # the policy after the substitution never ran
+
+
+# ── lifecycle ─────────────────────────────────────────────────
+
+
+async def test_aclose_closes_policies(pm):
+    """aclose() calls close() on every policy that exposes one."""
+    closed: list[str] = []
+
+    class _Closeable(Policy):
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        @property
+        def name(self) -> str:
+            return self._name
+
+        async def close(self) -> None:
+            closed.append(self._name)
+
+    await pm.add_policy(_Closeable("a"))
+    await pm.add_policy(
+        CustomPolicy(name="b", phase="pre", check=lambda c: True, deny_reason="")
+    )
+
+    await pm.aclose()
+
+    assert closed == ["a"]  # only the closeable policy is closed
 
 
 # ── introspection ────────────────────────────────────────────

@@ -121,6 +121,7 @@ def test_manual_review_export_no_callback():
     data = p.export()
     _assert_base_shape(data, name="review", type_name="manual_review", phases=["post"])
     assert data["config"]["has_review_callback"] is False
+    assert data["config"]["placeholder_message"] == "Request submitted to manual review"
     _assert_json_roundtrip(data)
 
 
@@ -128,9 +129,12 @@ def test_manual_review_export_with_callback():
     async def _review(payload: dict) -> dict:
         return {"approved": True}
 
-    p = ManualReviewPolicy(name="review2", review_callback=_review)
+    p = ManualReviewPolicy(
+        name="review2", review_callback=_review, placeholder_message="Held"
+    )
     data = p.export()
     assert data["config"]["has_review_callback"] is True
+    assert data["config"]["placeholder_message"] == "Held"
     _assert_json_roundtrip(data)
 
 

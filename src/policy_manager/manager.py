@@ -59,13 +59,30 @@ class PolicyManager:
     ) -> PolicyResult:
         """Run every policy's ``post_execute`` in registration order.
 
-        Same short-circuit semantics as the pre-execution chain.
+        The chain stops on the first **deny**, **pending**, or
+        **substituted** result.  A substituted result is terminal: the
+        policy has replaced the response body, so downstream post policies
+        (which would otherwise inspect a placeholder) are skipped.
         """
         for policy in self._policies:
             result = await policy.post_execute(context)
-            if not result.allowed:
+            if not result.allowed or result.substituted:
                 return result
         return PolicyResult.allow()
+
+    # ── lifecycle ────────────────────────────────────────────
+
+    async def aclose(self) -> None:
+        """Close any registered policy that holds external resources.
+
+        Policies may open resources during ``setup`` (e.g. a SQLite
+        connection).  A policy signals it needs cleanup by exposing an
+        async ``close()`` method; this calls it for every such policy.
+        """
+        for policy in self._policies:
+            close = getattr(policy, "close", None)
+            if close is not None:
+                await close()
 
     # ── introspection ────────────────────────────────────────
 

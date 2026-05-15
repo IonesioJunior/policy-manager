@@ -115,6 +115,7 @@ class Executor:
         # 1. Create store (use injected or create from config)
         store = self._injected_store or self._create_store(input_data.store)
         owns_store = self._injected_store is None  # We need to close it if we created it
+        pm: PolicyManager | None = None
 
         try:
             # 2. Build PolicyManager with policies
@@ -132,6 +133,12 @@ class Executor:
                 metadata=input_data.context.metadata.copy(),
             )
 
+            # Policy-only modes evaluate a single phase without a handler.
+            # Used by AgentExecutor to gate each agent turn (pre on the user
+            # message, post on the agent's reply).
+            if input_data.policy_phase is not None:
+                return await self._evaluate_policy_phase(pm, ctx, input_data)
+
             # 4. Pre-execution policies
             pre_result = await pm.check_pre_exec_policies(ctx)
             if not pre_result.allowed:
@@ -148,16 +155,64 @@ class Executor:
             if not post_result.allowed:
                 return self._policy_denied_output(post_result)
 
-            # 7. Success
+            # 7. Success.  A post policy may have substituted the response
+            #    body (e.g. ManualReviewPolicy) — deliver that instead of
+            #    the handler's own result.
+            result = post_result.output if post_result.substituted else handler_result
             return RunnerOutput(
                 success=True,
-                result=handler_result,
-                policy_result=PolicyResultSchema(allowed=True),
+                result=result,
+                policy_result=PolicyResultSchema(
+                    allowed=True,
+                    policy_name=post_result.policy_name,
+                    reason=post_result.reason,
+                    metadata=post_result.metadata,
+                ),
             )
         finally:
-            # Always close the store if we created it
+            # Always release policy resources and the store we created
+            if pm is not None:
+                await pm.aclose()
             if owns_store and hasattr(store, "close"):
                 await store.close()
+
+    async def _evaluate_policy_phase(
+        self,
+        pm: PolicyManager,
+        ctx: RequestContext,
+        input_data: RunnerInput,
+    ) -> RunnerOutput:
+        """Evaluate a single policy phase without invoking a handler.
+
+        ``policy_phase == "pre"`` runs the pre-execution chain against the
+        input; ``"post"`` runs the post-execution chain against the supplied
+        ``output``.  Used by AgentExecutor to gate each agent turn.
+        """
+        if input_data.policy_phase == "pre":
+            pre_result = await pm.check_pre_exec_policies(ctx)
+            if not pre_result.allowed:
+                return self._policy_denied_output(pre_result)
+            return RunnerOutput(
+                success=True,
+                policy_result=PolicyResultSchema(allowed=True),
+            )
+
+        # policy_phase == "post"
+        ctx.output = input_data.output or {}
+        post_result = await pm.check_post_exec_policies(ctx)
+        if not post_result.allowed:
+            return self._policy_denied_output(post_result)
+        result = post_result.output if post_result.substituted else ctx.output
+        return RunnerOutput(
+            success=True,
+            result=result,
+            policy_result=PolicyResultSchema(
+                allowed=True,
+                policy_name=post_result.policy_name,
+                reason=post_result.reason,
+                metadata=post_result.metadata,
+            ),
+        )
 
     def _create_store(self, config: StoreConfigSchema) -> Store:
         """Create store from configuration.
