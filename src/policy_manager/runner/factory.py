@@ -8,7 +8,8 @@ allowing extensibility without modifying factory code.
 
 from __future__ import annotations
 
-from typing import ClassVar
+import inspect
+from typing import Any, ClassVar
 
 from policy_manager.policies import (
     AccessGroupPolicy,
@@ -25,6 +26,24 @@ from policy_manager.policies import (
 )
 
 from .schema import PolicyConfigSchema
+
+
+def _accepted_kwargs(
+    policy_class: type[Policy], config: dict[str, Any]
+) -> dict[str, Any]:
+    """Return the subset of ``config`` that ``policy_class.__init__`` accepts.
+
+    If ``__init__`` declares ``**kwargs`` everything is passed through;
+    otherwise only keys matching a named parameter survive.  ``self`` and
+    ``name`` are always excluded (``name`` is supplied separately).  Extra
+    keys are dropped rather than raising ``TypeError`` so an endpoint still
+    loads when its policy YAML carries unrecognized keys.
+    """
+    params = inspect.signature(policy_class.__init__).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return dict(config)
+    accepted = {name for name in params if name not in ("self", "name")}
+    return {k: v for k, v in config.items() if k in accepted}
 
 
 class PolicyFactoryError(Exception):
@@ -152,9 +171,13 @@ class PolicyFactory:
                 f"Unknown policy type: '{config.type}'. Available types: {available}"
             )
 
-        # Filter config to only include valid kwargs for the policy
-        # All concrete policies accept name kwarg, but base Policy doesn't declare it
-        return policy_class(name=config.name, **config.config)  # type: ignore[call-arg]
+        # Pass only the config keys the policy's __init__ actually accepts.
+        # An endpoint's policy YAML may carry extra or forward-compat keys
+        # (e.g. a newer template) that the current policy class doesn't
+        # declare — dropping them keeps the whole endpoint from failing to
+        # load with a TypeError.
+        kwargs = _accepted_kwargs(policy_class, config.config)
+        return policy_class(name=config.name, **kwargs)  # type: ignore[call-arg]
 
     def _create_composite(self, config: PolicyConfigSchema) -> Policy:
         """Create composite policy, resolving child references.

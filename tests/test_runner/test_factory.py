@@ -45,6 +45,43 @@ class TestPolicyFactory:
         assert data["type"] == "rate_limit"
         assert data["config"]["max_requests"] == 10
 
+    def test_extra_config_keys_are_dropped(self):
+        """A policy YAML carrying keys the class doesn't accept still loads.
+
+        Endpoint policy templates may include forward-compat keys (e.g.
+        timeout_seconds, webhook_url for manual_review). The factory drops
+        unrecognized keys instead of failing the whole endpoint.
+        """
+        factory = PolicyFactory()
+        configs = [
+            PolicyConfigSchema(
+                name="manual review",
+                type="manual_review",
+                config={"timeout_seconds": 3600, "webhook_url": "", "bogus": "x"},
+            )
+        ]
+
+        policies = factory.create_all(configs)
+
+        assert len(policies) == 1
+        assert policies[0].name == "manual review"
+        assert policies[0].export()["type"] == "manual_review"
+
+    def test_valid_config_keys_still_passed(self):
+        """Recognized config keys are still forwarded after filtering."""
+        factory = PolicyFactory()
+        policies = factory.create_all(
+            [
+                PolicyConfigSchema(
+                    name="rl",
+                    type="rate_limit",
+                    config={"max_requests": 7, "window_seconds": 60, "extra": "ignored"},
+                )
+            ]
+        )
+
+        assert policies[0].export()["config"]["max_requests"] == 7
+
     def test_unknown_type_raises_error(self):
         """Test that unknown policy type raises error."""
         factory = PolicyFactory()
