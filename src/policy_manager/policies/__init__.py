@@ -9,6 +9,7 @@ from policy_manager.policies.manual_review import ManualReviewPolicy
 from policy_manager.policies.prompt_filter import PromptFilterPolicy
 from policy_manager.policies.rate_limit import RateLimitPolicy
 from policy_manager.policies.token_limit import TokenLimitPolicy
+from policy_manager.policies.x402_pay_per_request import X402PayPerRequestPolicy
 from policy_manager.result import PolicyResult
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "PromptFilterPolicy",
     "RateLimitPolicy",
     "TokenLimitPolicy",
+    "X402PayPerRequestPolicy",
 ]

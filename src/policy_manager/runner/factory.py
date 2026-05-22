@@ -23,6 +23,7 @@ from policy_manager.policies import (
     PromptFilterPolicy,
     RateLimitPolicy,
     TokenLimitPolicy,
+    X402PayPerRequestPolicy,
 )
 
 from .schema import PolicyConfigSchema
@@ -79,6 +80,7 @@ class PolicyFactory:
         "prompt_filter": PromptFilterPolicy,
         "attribution": AttributionPolicy,
         "manual_review": ManualReviewPolicy,
+        "x402_pay_per_request": X402PayPerRequestPolicy,
         "custom": CustomPolicy,
     }
 
