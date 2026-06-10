@@ -140,7 +140,10 @@ class X402PayPerRequestPolicy(Policy):
             payment entirely (free tier).
     """
 
-    _policy_type = "x402_pay_per_request"
+    # ``mpp`` is the canonical pay-as-you-go billing type across the SyftHub
+    # ecosystem (hub wire type, syft-space wallet provider, Go SDK). The class
+    # name still documents the enforcement mechanism (x402 / Tempo USDC).
+    _policy_type = "mpp"
     _policy_description = "Pay-per-request gate via x402 / Tempo USDC"
 
     def __init__(

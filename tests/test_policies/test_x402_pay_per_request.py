@@ -366,7 +366,7 @@ async def test_export_includes_hmac_secret_kid(store, tmp_path):
     await p.setup(store)
     try:
         data = p.export()
-        assert data["type"] == "x402_pay_per_request"
+        assert data["type"] == "mpp"
         assert data["name"] == "x402"
         cfg = data["config"]
         assert cfg["pay_to"] == "0xPayTo"
@@ -394,7 +394,7 @@ def test_factory_registers_x402_pay_per_request():
         [
             PolicyConfigSchema(
                 name="x402-test",
-                type="x402_pay_per_request",
+                type="mpp",
                 config={
                     "pay_to": "0xPayTo",
                     "price": "0.05",
@@ -411,4 +411,4 @@ def test_factory_registers_x402_pay_per_request():
     assert len(policies) == 1
     assert isinstance(policies[0], X402PayPerRequestPolicy)
     assert policies[0].name == "x402-test"
-    assert "x402_pay_per_request" in PolicyFactory.registered_types()
+    assert "mpp" in PolicyFactory.registered_types()

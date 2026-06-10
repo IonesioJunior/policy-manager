@@ -80,7 +80,9 @@ class PolicyFactory:
         "prompt_filter": PromptFilterPolicy,
         "attribution": AttributionPolicy,
         "manual_review": ManualReviewPolicy,
-        "x402_pay_per_request": X402PayPerRequestPolicy,
+        # Canonical pay-as-you-go billing type across the ecosystem; the class
+        # name documents the x402/Tempo enforcement mechanism.
+        "mpp": X402PayPerRequestPolicy,
         "custom": CustomPolicy,
     }
 
