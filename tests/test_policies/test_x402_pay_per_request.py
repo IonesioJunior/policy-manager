@@ -84,9 +84,7 @@ async def test_pre_execute_without_credential_returns_pending_with_spec_and_no_d
     assert rows == []
 
 
-async def test_pre_execute_with_allow_listed_payer_returns_allow_and_no_db_write(
-    store, tmp_path
-):
+async def test_pre_execute_with_allow_listed_payer_returns_allow_and_no_db_write(store, tmp_path):
     p = _make_policy(tmp_path, allow_listed_payers=["vip@example.com"])
     await p.setup(store)
     try:
@@ -155,9 +153,7 @@ async def test_pre_execute_with_payment_verified_but_missing_challenge_id_denies
     assert await policy.list_transactions() == []
 
 
-async def test_pre_execute_enforces_max_pending_settlements_per_payer(
-    store, tmp_path
-):
+async def test_pre_execute_enforces_max_pending_settlements_per_payer(store, tmp_path):
     p = _make_policy(tmp_path, max_pending_settlements_per_payer=2)
     await p.setup(store)
     try:
@@ -228,9 +224,7 @@ async def test_replay_same_challenge_id_is_idempotent(policy):
         "payment_challenge_id": "canon-replay",
     }
     first = await policy.pre_execute(RequestContext(user_id="alice", input={}, metadata=meta))
-    second = await policy.pre_execute(
-        RequestContext(user_id="alice", input={}, metadata=meta)
-    )
+    second = await policy.pre_execute(RequestContext(user_id="alice", input={}, metadata=meta))
 
     assert first.allowed
     assert second.allowed

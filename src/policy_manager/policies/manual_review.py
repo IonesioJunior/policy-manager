@@ -116,9 +116,7 @@ class ManualReviewPolicy(Policy):
         """
         await super().setup(store)
         if self._db_path is None:
-            self._db_path = (
-                store.db_path if isinstance(store, SQLiteStore) else _DEFAULT_DB_PATH
-            )
+            self._db_path = store.db_path if isinstance(store, SQLiteStore) else _DEFAULT_DB_PATH
         await self._connect()
 
     async def _connect(self) -> aiosqlite.Connection:

@@ -25,6 +25,7 @@ class _SubstitutingPolicy(Policy):
     async def post_execute(self, context):  # type: ignore[no-untyped-def]
         return PolicyResult.substitute(self._name, output="substituted body")
 
+
 # ── basic chain behaviour ────────────────────────────────────
 
 
@@ -230,9 +231,7 @@ async def test_aclose_closes_policies(pm):
             closed.append(self._name)
 
     await pm.add_policy(_Closeable("a"))
-    await pm.add_policy(
-        CustomPolicy(name="b", phase="pre", check=lambda c: True, deny_reason="")
-    )
+    await pm.add_policy(CustomPolicy(name="b", phase="pre", check=lambda c: True, deny_reason=""))
 
     await pm.aclose()
 

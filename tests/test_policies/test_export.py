@@ -129,9 +129,7 @@ def test_manual_review_export_with_callback():
     async def _review(payload: dict) -> dict:
         return {"approved": True}
 
-    p = ManualReviewPolicy(
-        name="review2", review_callback=_review, placeholder_message="Held"
-    )
+    p = ManualReviewPolicy(name="review2", review_callback=_review, placeholder_message="Held")
     data = p.export()
     assert data["config"]["has_review_callback"] is True
     assert data["config"]["placeholder_message"] == "Held"
