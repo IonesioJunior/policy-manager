@@ -112,6 +112,11 @@ class PolicyResultSchema(BaseModel):
         policy_name: Name of the policy that made the decision
         reason: Human-readable explanation (for denials)
         pending: Whether the request is pending async resolution
+        substituted: Whether a policy replaced the response body with its own
+            (e.g. manual_review's placeholder). The request still succeeded
+            (``allowed`` is True) but the delivered body is the policy's, not
+            the handler's. Lets the Go SDK detect a held reply explicitly
+            instead of inferring it from a body/reply mismatch.
         metadata: Additional policy-specific metadata
     """
 
@@ -119,6 +124,7 @@ class PolicyResultSchema(BaseModel):
     policy_name: str = ""
     reason: str = ""
     pending: bool = False
+    substituted: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

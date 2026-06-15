@@ -49,7 +49,17 @@ class AllOf(Policy):
     async def post_execute(self, context: RequestContext) -> PolicyResult:
         for p in self._policies:
             result = await p.post_execute(context)
-            if not result.allowed:
+            # Stop on the first terminal result — a denial or a substitution.
+            # A substitution must be returned as-is: collapsing it to a plain
+            # allow at the end of the loop would drop the substituted flag and
+            # body, so the executor would fall back to delivering the real
+            # handler output (a leak). Treating substitution as terminal also
+            # keeps AllOf identical to the flat PolicyManager chain, which uses
+            # the same predicate — a later child's denial is intentionally NOT
+            # evaluated once a child has substituted (the substituting policy,
+            # e.g. manual_review, is responsible for withholding the real
+            # output). See test_allof_substitution_short_circuits_denial.
+            if result.is_terminal():
                 return result
         return PolicyResult.allow(self.name)
 
@@ -90,7 +100,14 @@ class AnyOf(Policy):
         for p in self._policies:
             result = await getattr(p, method)(context)
             if result.allowed:
-                return PolicyResult.allow(self.name)
+                # First passing child wins (short-circuit) — OR semantics: once
+                # any child is satisfied the composite is satisfied, so later
+                # children (including a hold/substitution that comes after a
+                # plain pass) are intentionally not evaluated. Preserve the
+                # winning child's substitution so its replaced body (e.g.
+                # manual_review's placeholder) is not discarded; a plain pass
+                # collapses to the composite's own identity.
+                return result if result.substituted else PolicyResult.allow(self.name)
             last_denial = result
 
         return last_denial or PolicyResult.deny(self.name, "No child policies configured")
@@ -133,6 +150,12 @@ class Not(Policy):
         await self._policy.setup(store)
 
     def _invert(self, result: PolicyResult) -> PolicyResult:
+        # A pending child has not reached a verdict yet — there is nothing to
+        # invert. Preserve the pending state instead of fabricating a clean
+        # allow, which would silently convert an awaiting-resolution hold into
+        # an unconditional pass.
+        if result.pending:
+            return result
         if result.allowed:
             return PolicyResult.deny(self.name, self._deny_reason)
         return PolicyResult.allow(self.name)

@@ -66,7 +66,7 @@ class PolicyManager:
         """
         for policy in self._policies:
             result = await policy.post_execute(context)
-            if not result.allowed or result.substituted:
+            if result.is_terminal():
                 return result
         return PolicyResult.allow()
 
