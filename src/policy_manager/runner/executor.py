@@ -159,16 +159,7 @@ class Executor:
             #    body (e.g. ManualReviewPolicy) — deliver that instead of
             #    the handler's own result.
             result = post_result.output if post_result.substituted else handler_result
-            return RunnerOutput(
-                success=True,
-                result=result,
-                policy_result=PolicyResultSchema(
-                    allowed=True,
-                    policy_name=post_result.policy_name,
-                    reason=post_result.reason,
-                    metadata=post_result.metadata,
-                ),
-            )
+            return self._policy_success_output(result, post_result)
         finally:
             # Always release policy resources and the store we created
             if pm is not None:
@@ -203,16 +194,7 @@ class Executor:
         if not post_result.allowed:
             return self._policy_denied_output(post_result)
         result = post_result.output if post_result.substituted else ctx.output
-        return RunnerOutput(
-            success=True,
-            result=result,
-            policy_result=PolicyResultSchema(
-                allowed=True,
-                policy_name=post_result.policy_name,
-                reason=post_result.reason,
-                metadata=post_result.metadata,
-            ),
-        )
+        return self._policy_success_output(result, post_result)
 
     def _create_store(self, config: StoreConfigSchema) -> Store:
         """Create store from configuration.
@@ -288,6 +270,32 @@ class Executor:
 
         except Exception as e:
             raise ExecutionError(f"Handler execution failed: {e}") from e
+
+    def _policy_success_output(self, result: Any, post_result: PolicyResult) -> RunnerOutput:
+        """Build a successful RunnerOutput from a passing post-execution result.
+
+        Shared by the full-execution flow and the post-only policy phase so the
+        serialized ``policy_result`` shape — including ``substituted`` — stays
+        identical across both paths and new fields only need threading once.
+
+        Args:
+            result: Response body to deliver (handler output or a substitution).
+            post_result: The passing post-execution policy result.
+
+        Returns:
+            RunnerOutput indicating success.
+        """
+        return RunnerOutput(
+            success=True,
+            result=result,
+            policy_result=PolicyResultSchema(
+                allowed=True,
+                policy_name=post_result.policy_name,
+                reason=post_result.reason,
+                substituted=post_result.substituted,
+                metadata=post_result.metadata,
+            ),
+        )
 
     def _policy_denied_output(self, result: PolicyResult) -> RunnerOutput:
         """Convert PolicyResult to RunnerOutput for denial.

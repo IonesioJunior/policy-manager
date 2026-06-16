@@ -33,6 +33,18 @@ class PolicyResult:
     output: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def is_terminal(self) -> bool:
+        """Whether this result stops the policy chain.
+
+        A denial or a substitution ends the chain: a denial blocks the
+        request, and a substitution has already replaced the response body so
+        downstream policies would only inspect a placeholder. The single
+        source of truth for chain termination, shared by ``PolicyManager`` and
+        the composite policies. Pre-execution results are never substituted, so
+        for the pre chain this reduces to "not allowed".
+        """
+        return not self.allowed or self.substituted
+
     # ── Factory helpers ──────────────────────────────────────
 
     @staticmethod
@@ -59,9 +71,7 @@ class PolicyResult:
         )
 
     @staticmethod
-    def substitute(
-        policy_name: str, output: Any, reason: str = "", **meta: Any
-    ) -> PolicyResult:
+    def substitute(policy_name: str, output: Any, reason: str = "", **meta: Any) -> PolicyResult:
         """Result for a policy that replaced the response body with its own.
 
         The request still succeeds (``allowed=True``) — the executor

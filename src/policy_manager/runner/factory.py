@@ -29,9 +29,7 @@ from policy_manager.policies import (
 from .schema import PolicyConfigSchema
 
 
-def _accepted_kwargs(
-    policy_class: type[Policy], config: dict[str, Any]
-) -> dict[str, Any]:
+def _accepted_kwargs(policy_class: type[Policy], config: dict[str, Any]) -> dict[str, Any]:
     """Return the subset of ``config`` that ``policy_class.__init__`` accepts.
 
     If ``__init__`` declares ``**kwargs`` everything is passed through;
@@ -80,7 +78,9 @@ class PolicyFactory:
         "prompt_filter": PromptFilterPolicy,
         "attribution": AttributionPolicy,
         "manual_review": ManualReviewPolicy,
-        "x402_pay_per_request": X402PayPerRequestPolicy,
+        # Canonical pay-as-you-go billing type across the ecosystem; the class
+        # name documents the x402/Tempo enforcement mechanism.
+        "mpp": X402PayPerRequestPolicy,
         "custom": CustomPolicy,
     }
 

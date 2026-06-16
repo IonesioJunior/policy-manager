@@ -63,8 +63,7 @@ class TestManualReviewSubstitution:
     def _write_handler(self, tmp_path):
         handler_file = tmp_path / "runner.py"
         handler_file.write_text(
-            "def handler(query, metadata):\n"
-            "    return {'response': 'real answer: ' + query}\n"
+            "def handler(query, metadata):\n    return {'response': 'real answer: ' + query}\n"
         )
         return handler_file
 
@@ -205,8 +204,6 @@ class TestPolicyPhase:
 
         # The supplied output is what got persisted for review.
         conn = sqlite3.connect(store_db)
-        (stored_output,) = conn.execute(
-            "SELECT output FROM manual_reviews"
-        ).fetchone()
+        (stored_output,) = conn.execute("SELECT output FROM manual_reviews").fetchone()
         conn.close()
         assert json.loads(stored_output) == {"response": "the real agent reply"}

@@ -18,9 +18,7 @@ async def mr(store, tmp_path):
 
 
 async def test_post_substitutes_string_for_model(mr):
-    ctx = RequestContext(
-        user_id="alice", input={"type": "model"}, output={"response": "r"}
-    )
+    ctx = RequestContext(user_id="alice", input={"type": "model"}, output={"response": "r"})
     result = await mr.post_execute(ctx)
 
     # The request succeeds with a substituted placeholder body.
@@ -38,9 +36,7 @@ async def test_post_substitutes_string_for_model(mr):
 
 
 async def test_post_substitutes_document_list_for_data_source(mr):
-    ctx = RequestContext(
-        user_id="alice", input={"type": "data_source"}, output={"response": "r"}
-    )
+    ctx = RequestContext(user_id="alice", input={"type": "data_source"}, output={"response": "r"})
     result = await mr.post_execute(ctx)
 
     assert result.substituted
@@ -169,16 +165,11 @@ async def test_reuses_sqlite_store_db_file(tmp_path):
 
     policy = ManualReviewPolicy(name="mr")  # no db_path -> reuse the store file
     await policy.setup(store)
-    await policy.post_execute(
-        RequestContext(user_id="alice", input={}, output={"response": "r"})
-    )
+    await policy.post_execute(RequestContext(user_id="alice", input={}, output={"response": "r"}))
 
     # Both tables coexist in the single shared database file.
     conn = sqlite3.connect(db_file)
-    tables = {
-        row[0]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-    }
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     conn.close()
     assert "manual_reviews" in tables
     assert "policy_store" in tables
@@ -194,9 +185,7 @@ async def test_pending_column_visible_to_external_reader(mr):
 
     def count_pending() -> int:
         conn = sqlite3.connect(mr._db_path)
-        (n,) = conn.execute(
-            "SELECT COUNT(*) FROM manual_reviews WHERE pending = 1"
-        ).fetchone()
+        (n,) = conn.execute("SELECT COUNT(*) FROM manual_reviews WHERE pending = 1").fetchone()
         conn.close()
         return n
 

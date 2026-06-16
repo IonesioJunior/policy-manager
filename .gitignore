@@ -19,3 +19,4 @@ build/
 
 # SQLite databases (created by tests/examples)
 *.db
+.gitnexus

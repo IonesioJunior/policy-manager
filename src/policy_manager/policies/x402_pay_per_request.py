@@ -140,7 +140,10 @@ class X402PayPerRequestPolicy(Policy):
             payment entirely (free tier).
     """
 
-    _policy_type = "x402_pay_per_request"
+    # ``mpp`` is the canonical pay-as-you-go billing type across the SyftHub
+    # ecosystem (hub wire type, syft-space wallet provider, Go SDK). The class
+    # name still documents the enforcement mechanism (x402 / Tempo USDC).
+    _policy_type = "mpp"
     _policy_description = "Pay-per-request gate via x402 / Tempo USDC"
 
     def __init__(
@@ -185,9 +188,7 @@ class X402PayPerRequestPolicy(Policy):
         """
         await super().setup(store)
         if self._db_path is None:
-            self._db_path = (
-                store.db_path if isinstance(store, SQLiteStore) else _DEFAULT_DB_PATH
-            )
+            self._db_path = store.db_path if isinstance(store, SQLiteStore) else _DEFAULT_DB_PATH
         await self._connect()
 
     async def _connect(self) -> aiosqlite.Connection:
@@ -227,9 +228,7 @@ class X402PayPerRequestPolicy(Policy):
             "realm": self._realm,
             "hmac_secret_kid": self._hmac_secret_kid,
             "challenge_ttl_seconds": self._challenge_ttl_seconds,
-            "max_pending_settlements_per_payer": (
-                self._max_pending_settlements_per_payer
-            ),
+            "max_pending_settlements_per_payer": (self._max_pending_settlements_per_payer),
             "allow_listed_payers": sorted(self._allow_listed_payers),
         }
         return data
@@ -310,9 +309,7 @@ class X402PayPerRequestPolicy(Policy):
                 self.name,
                 "too many unsettled payments; wait for settlement",
                 pending_settlements=pending,
-                max_pending_settlements_per_payer=(
-                    self._max_pending_settlements_per_payer
-                ),
+                max_pending_settlements_per_payer=(self._max_pending_settlements_per_payer),
             )
 
         await self._insert_row(
@@ -360,11 +357,7 @@ class X402PayPerRequestPolicy(Policy):
             await db.commit()
         else:
             assert failure is not None  # narrowing for type checkers
-            reason = (
-                failure.get("reason")
-                if isinstance(failure, dict)
-                else str(failure)
-            )
+            reason = failure.get("reason") if isinstance(failure, dict) else str(failure)
             await db.execute(
                 """
                 UPDATE x402_transactions
@@ -486,8 +479,7 @@ class X402PayPerRequestPolicy(Policy):
         db.row_factory = aiosqlite.Row
         try:
             cursor = await db.execute(
-                f"SELECT * FROM x402_transactions WHERE {where} "
-                "ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM x402_transactions WHERE {where} ORDER BY created_at DESC LIMIT ?",
                 params,
             )
             rows = await cursor.fetchall()
